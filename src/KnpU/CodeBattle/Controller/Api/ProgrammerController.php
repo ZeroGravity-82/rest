@@ -2,12 +2,15 @@
 
 namespace KnpU\CodeBattle\Controller\Api;
 
+use KnpU\CodeBattle\Api\ApiProblem;
+use KnpU\CodeBattle\Api\ApiProblemException;
 use KnpU\CodeBattle\Controller\BaseController;
 use KnpU\CodeBattle\Model\Programmer;
 use Silex\ControllerCollection;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class ProgrammerController extends BaseController
 {
@@ -25,6 +28,11 @@ class ProgrammerController extends BaseController
     {
         $programmer = new Programmer();
         $this->handleRequest($request, $programmer);
+        $errors = $this->validate($programmer);
+        if (!empty($errors)) {
+            return $this->throwApiProblemException($errors);
+        }
+        $this->save($programmer);
 
         $url = $this->generateUrl('api_programmers_show', [
             'nickname' => $programmer->nickname,
@@ -47,6 +55,11 @@ class ProgrammerController extends BaseController
         }
 
         $this->handleRequest($request, $programmer);
+        $errors = $this->validate($programmer);
+        if (!empty($errors)) {
+            return $this->throwApiProblemException($errors);
+        }
+        $this->save($programmer);
 
         $data = $this->serializeProgrammer($programmer);
         $response = new JsonResponse($data, Response::HTTP_OK);
@@ -110,9 +123,10 @@ class ProgrammerController extends BaseController
     private function handleRequest(Request $request, Programmer $programmer)
     {
         $data = json_decode($request->getContent(), true);
-
         if ($data === null) {
-            throw new \Exception('Invalid JSON: '.$request->getContent());
+            $apiProblem = new ApiProblem(Response::HTTP_BAD_REQUEST, ApiProblem::TYPE_INVALID_BODY_FORMAT);
+
+            throw new ApiProblemException($apiProblem);
         }
 
         $isNew = !$programmer->id;
@@ -128,6 +142,13 @@ class ProgrammerController extends BaseController
         }
 
         $programmer->userId = $this->findUserByUsername('weaverryan')->id;
-        $this->save($programmer);
+    }
+
+    private function throwApiProblemException(array $errors)
+    {
+        $apiProblem = new ApiProblem(Response::HTTP_UNPROCESSABLE_ENTITY, ApiProblem::TYPE_VALIDATION_ERROR);
+        $apiProblem->set('errors', $errors);
+
+        throw new ApiProblemException($apiProblem);
     }
 }

@@ -11,6 +11,9 @@ class Programmer
     /* All public properties are persisted */
     public $id;
 
+    /**
+     * @Assert\NotBlank(message="Enter non-empty nickname")
+     */
     public $nickname;
 
     /**
@@ -20,6 +23,9 @@ class Programmer
      */
     public $avatarNumber;
 
+    /**
+     * @Assert\NotBlank(message="Enter non-empty tag")
+     */
     public $tagLine;
 
     public $userId;
