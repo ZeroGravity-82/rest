@@ -2,15 +2,14 @@
 
 namespace KnpU\CodeBattle\Controller\Api;
 
+use Hateoas\Representation\CollectionRepresentation;
 use KnpU\CodeBattle\Api\ApiProblem;
 use KnpU\CodeBattle\Api\ApiProblemException;
 use KnpU\CodeBattle\Controller\BaseController;
 use KnpU\CodeBattle\Model\Programmer;
 use Silex\ControllerCollection;
-use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\HttpException;
+use Symfony\Component\HttpFoundation\Request;
 
 class ProgrammerController extends BaseController
 {
@@ -28,17 +27,17 @@ class ProgrammerController extends BaseController
     {
         $programmer = new Programmer();
         $this->handleRequest($request, $programmer);
-        $errors = $this->validate($programmer);
-        if (!empty($errors)) {
+
+        if ($errors = $this->validate($programmer)) {
             return $this->throwApiProblemException($errors);
         }
+
         $this->save($programmer);
 
         $url = $this->generateUrl('api_programmers_show', [
             'nickname' => $programmer->nickname,
         ]);
-        $data = $this->serializeProgrammer($programmer);
-        $response = new JsonResponse($data, Response::HTTP_CREATED);
+        $response = $this->createApiResponse($programmer, Response::HTTP_CREATED);
         $response->headers->set('Location', $url);
 
         return $response;
@@ -54,6 +53,8 @@ class ProgrammerController extends BaseController
             $this->throw404('Programmer not found.');
         }
 
+        $this->enforceProgrammerOwnershipSecurity($programmer);
+
         $this->handleRequest($request, $programmer);
         $errors = $this->validate($programmer);
         if (!empty($errors)) {
@@ -61,8 +62,7 @@ class ProgrammerController extends BaseController
         }
         $this->save($programmer);
 
-        $data = $this->serializeProgrammer($programmer);
-        $response = new JsonResponse($data, Response::HTTP_OK);
+        $response = $this->createApiResponse($programmer, Response::HTTP_OK);
 
         return $response;
     }
@@ -70,6 +70,9 @@ class ProgrammerController extends BaseController
     public function deleteAction($nickname)
     {
         $programmer = $this->getProgrammerRepository()->findOneByNickName($nickname);
+
+        $this->enforceProgrammerOwnershipSecurity($programmer);
+
         $this->delete($programmer);
 
         $response = new Response(null, Response::HTTP_NO_CONTENT);
@@ -84,50 +87,29 @@ class ProgrammerController extends BaseController
             $this->throw404('Programmer not found!');
         }
 
-        $data = $this->serializeProgrammer($programmer);
-        $response = new JsonResponse($data, Response::HTTP_OK);
+        $response = $this->createApiResponse($programmer, Response::HTTP_OK);
 
         return $response;
     }
 
     public function listAction()
     {
-        $programmers = $this->getProgrammerRepository()
-            ->findAll();
+        $programmers = $this->getProgrammerRepository()->findAll();
+        $collection = new CollectionRepresentation([
+                'programmers' => $programmers,
+            ]
+        );
 
-        $data = [
-            'programmers' => [],
-        ];
-        foreach ($programmers as $programmer) {
-            $data['programmers'][] = $this->serializeProgrammer($programmer);
-        }
-
-        $response = new JsonResponse($data, Response::HTTP_OK);
+        $response = $this->createApiResponse($collection, Response::HTTP_OK);
 
         return $response;
     }
 
-    private function serializeProgrammer(Programmer $programmer)
-    {
-        $data = [
-            'nickname'     => $programmer->nickname,
-            'avatarNumber' => $programmer->avatarNumber,
-            'tagLine'      => $programmer->tagLine,
-            'userId'       => $programmer->userId,
-            'powerLevel'   => $programmer->powerLevel,
-        ];
-
-        return $data;
-    }
-
     private function handleRequest(Request $request, Programmer $programmer)
     {
-        $data = json_decode($request->getContent(), true);
-        if ($data === null) {
-            $apiProblem = new ApiProblem(Response::HTTP_BAD_REQUEST, ApiProblem::TYPE_INVALID_BODY_FORMAT);
+        $this->enforceUserSecurity();
 
-            throw new ApiProblemException($apiProblem);
-        }
+        $data = $this->decodeRequestBodyIntoParameters($request);
 
         $isNew = !$programmer->id;
         $apiProperties = ['avatarNumber', 'tagLine'];
@@ -135,20 +117,12 @@ class ProgrammerController extends BaseController
             $apiProperties[] = 'nickname';
         }
         foreach ($apiProperties as $property) {
-            if ($request->isMethod('PATCH') && !isset($data[$property])) {
+            if ($request->isMethod('PATCH') && !$data->has($property)) {
                 continue;
             }
-            $programmer->$property = $data[$property] ?? null;
+            $programmer->$property = $data->get($property);
         }
 
-        $programmer->userId = $this->findUserByUsername('weaverryan')->id;
-    }
-
-    private function throwApiProblemException(array $errors)
-    {
-        $apiProblem = new ApiProblem(Response::HTTP_UNPROCESSABLE_ENTITY, ApiProblem::TYPE_VALIDATION_ERROR);
-        $apiProblem->set('errors', $errors);
-
-        throw new ApiProblemException($apiProblem);
+        $programmer->userId = $this->getLoggedInUser()->id;
     }
 }

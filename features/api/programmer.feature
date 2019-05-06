@@ -4,10 +4,11 @@ Feature: Programmer
   I need to be able to create programmers and power them up
 
   Background:
-     Given the user "weaverryan" exists
+    Given the user "weaverryan" exists
+    And "weaverryan" has an authentication token "sywpcu2fq1c8044o4s8os8scoco8wso"
+    And I set the "Authorization" header to be "token sywpcu2fq1c8044o4s8os8scoco8wso"
 
   Scenario: POST a programmer
-  {
     Given I have the payload:
       """
       {
@@ -77,6 +78,8 @@ Feature: Programmer
       powerLevel
       """
     And the "nickname" property should be a string equalling "UnitTester"
+    And the "userId" property should not exist
+    And the link "self" should exist and its value should be "/api/programmers/UnitTester"
 
   Scenario: GET all programmers
     Given the following programmers exist:
@@ -86,8 +89,10 @@ Feature: Programmer
       | ZeroGravity| 1            |
     When I request "GET /api/programmers"
     Then the response status code should be 200
-    And the "programmers" property should be an array
-    And the "programmers" property should contain 3 items
+    And the "_embedded.items.programmers" property should be an array
+    And the "_embedded.items.programmers" property should contain 3 items
+    And the "_embedded.items.programmers.0.nickname" property should equal "UnitTester"
+    And print last response
 
   Scenario: DELETE a programmer
     Given the following programmers exist:

@@ -2,6 +2,10 @@
 
 namespace KnpU\CodeBattle\Controller;
 
+use JMS\Serializer\SerializationContext;
+use JMS\Serializer\Serializer;
+use KnpU\CodeBattle\Api\ApiProblem;
+use KnpU\CodeBattle\Api\ApiProblemException;
 use KnpU\CodeBattle\Model\Programmer;
 use KnpU\CodeBattle\Model\User;
 use KnpU\CodeBattle\Repository\UserRepository;
@@ -9,13 +13,16 @@ use KnpU\CodeBattle\Application;
 use Silex\Application as SilexApplication;
 use Silex\ControllerCollection;
 use Silex\ControllerProviderInterface;
+use Symfony\Component\HttpFoundation\ParameterBag;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\HttpFoundation\Request;
 use KnpU\CodeBattle\Repository\ProgrammerRepository;
 use KnpU\CodeBattle\Repository\ProjectRepository;
 use KnpU\CodeBattle\Security\Token\ApiTokenRepository;
+use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 /**
  * Base controller class to hide Silex-related implementation details
@@ -46,8 +53,8 @@ abstract class BaseController implements ControllerProviderInterface
     /**
      * Render a twig template
      *
-     * @param  string $template  The template filename
-     * @param  array  $variables
+     * @param string $template The template filename
+     * @param array $variables
      * @return string
      */
     public function render($template, array $variables = array())
@@ -78,9 +85,9 @@ abstract class BaseController implements ControllerProviderInterface
     }
 
     /**
-     * @param  string $routeName  The name of the route
-     * @param  array  $parameters Route variables
-     * @param  bool   $absolute
+     * @param string $routeName The name of the route
+     * @param array $parameters Route variables
+     * @param bool $absolute
      * @return string A URL!
      */
     public function generateUrl($routeName, array $parameters = array(), $absolute = false)
@@ -93,8 +100,8 @@ abstract class BaseController implements ControllerProviderInterface
     }
 
     /**
-     * @param  string           $url
-     * @param  int              $status
+     * @param string $url
+     * @param int $status
      * @return RedirectResponse
      */
     public function redirect($url, $status = 302)
@@ -228,4 +235,63 @@ abstract class BaseController implements ControllerProviderInterface
         return $this->container['repository.api_token'];
     }
 
+    protected function serialize($data)
+    {
+        /** @var Serializer $serializer */
+        $serializer = $this->container['serializer'];
+
+        $serializationContext = new SerializationContext();
+        $serializationContext->setSerializeNull(true);
+
+        return $serializer->serialize($data, 'json', $serializationContext);
+    }
+
+    protected function createApiResponse($data, $statusCode = Response::HTTP_OK)
+    {
+        $json = $this->serialize($data);
+
+        return new Response($json, $statusCode, [
+            'Content-Type' => 'application/hal+json',
+        ]);
+    }
+
+    protected function enforceUserSecurity()
+    {
+        if (!$this->isUserLoggedIn()) {
+            throw new AccessDeniedException();
+        }
+    }
+
+    protected function enforceProgrammerOwnershipSecurity(Programmer $programmer)
+    {
+        $this->enforceUserSecurity();
+
+        if ($this->getLoggedInUser()->id !== $programmer->userId) {
+            throw new AccessDeniedException();
+        }
+    }
+
+    protected function decodeRequestBodyIntoParameters(Request $request)
+    {
+        if (!$request->getContent()) {
+            $data = [];
+        } else {
+            $data = json_decode($request->getContent(), true);
+            if ($data === null) {
+                $apiProblem = new ApiProblem(Response::HTTP_BAD_REQUEST, ApiProblem::TYPE_INVALID_BODY_FORMAT);
+
+                throw new ApiProblemException($apiProblem);
+            }
+        }
+
+        return new ParameterBag($data);
+    }
+
+    protected function throwApiProblemException(array $errors)
+    {
+        $apiProblem = new ApiProblem(Response::HTTP_UNPROCESSABLE_ENTITY, ApiProblem::TYPE_VALIDATION_ERROR);
+        $apiProblem->set('errors', $errors);
+
+        throw new ApiProblemException($apiProblem);
+    }
 }

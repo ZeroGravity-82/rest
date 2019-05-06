@@ -3,8 +3,13 @@
 namespace KnpU\CodeBattle;
 
 use Doctrine\Common\Annotations\AnnotationReader;
+use Hateoas\HateoasBuilder;
+use Hateoas\UrlGenerator\SymfonyUrlGenerator;
+use JMS\Serializer\Naming\IdenticalPropertyNamingStrategy;
+use JMS\Serializer\SerializerBuilder;
 use KnpU\CodeBattle\Api\ApiProblem;
 use KnpU\CodeBattle\Api\ApiProblemException;
+use KnpU\CodeBattle\Api\ApiProblemResponseFactory;
 use KnpU\CodeBattle\Battle\PowerManager;
 use KnpU\CodeBattle\Repository\BattleRepository;
 use KnpU\CodeBattle\Repository\ProjectRepository;
@@ -210,6 +215,21 @@ class Application extends SilexApplication
         $this['api.validator'] = $this->share(function() use ($app) {
             return new ApiValidator($app['validator']);
         });
+
+        $this['serializer'] = $this->share(function() use ($app) {
+            $serializerBuilder = SerializerBuilder::create()
+                ->setCacheDir($app['root_dir'].'/cache/serializer')
+                ->setDebug($app['debug'])
+                ->setPropertyNamingStrategy(new IdenticalPropertyNamingStrategy());
+
+            return HateoasBuilder::create($serializerBuilder)
+                ->setUrlGenerator(null, new SymfonyUrlGenerator($app['url_generator']))
+                ->build();
+        });
+
+        $this['api.response_factory'] = $this->share(function() use ($app) {
+            return new ApiProblemResponseFactory();
+        });
     }
 
     private function configureSecurity()
@@ -225,6 +245,7 @@ class Application extends SilexApplication
                     }),
                     'stateless' => true,
                     'anonymous' => true,
+                    'http'      => true,
                     'api_token' => true,
                 ),
                 'main' => array(
@@ -265,7 +286,7 @@ class Application extends SilexApplication
 
             // the class that decides what should happen if no authentication credentials are passed
             $this['security.entry_point.'.$name.'.api_token'] = $app->share(function() use ($app) {
-                return new ApiEntryPoint($app['translator']);
+                return new ApiEntryPoint($app['translator'], $app['api.response_factory']);
             });
 
             return array(
@@ -309,19 +330,10 @@ class Application extends SilexApplication
                 }
             }
 
-            $data = $apiProblem->toArray();
-            if ($data['type'] !== 'about:blank') {
-                $data['type'] = 'http://localhost:8082/docs/errors#'.$data['type'];
-            }
-            $response = new JsonResponse(
-                $data,
-                $apiProblem->getStatusCode()
-            );
-            $response->headers->add([
-                'Content-Type' => 'application/problem+json',
-            ]);
+            /** @var ApiProblemResponseFactory $response */
+            $response = $app['api.response_factory'];
 
-            return $response;
+            return $response->createResponse($apiProblem);
         });
     }
 } 
